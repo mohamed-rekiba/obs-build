@@ -1187,6 +1187,10 @@ sub parse {
   $ret->{'configdependent'} = 1 if $ifdeps;
   $ret->{'moveassets'} = [ map {"$_/$moveassets{$_}"} sort keys %moveassets] if %moveassets;
   $ret->{'dirassets'} = [ sort keys %dirassets ] if %dirassets;
+  
+  # Enhance dependencies using rpmspec for complete Lua macro expansion
+  enhance_deps_with_rpmspec($specfile, $ret, $config);
+  
   do_warn($config, "unterminated if/ifarch/ifos statement") if $skip && $config->{'parsing_config'};
   return $ret;
 }
@@ -1921,6 +1925,71 @@ sub shiftrich {
     $dep .= ' ' . shift(@$s);
   }
   return $dep;
+}
+
+# Enhance dependency list using rpmspec for complete macro expansion
+sub enhance_deps_with_rpmspec {
+  my ($specfile, $ret, $config) = @_;
+  
+  # Only run rpmspec if we have a file path (not in-memory spec data)
+  return unless $specfile && !ref($specfile) && -f $specfile;
+  
+  # Skip if rpmspec is not available
+  return unless -x '/usr/bin/rpmspec';
+  
+  my @rpmspec_buildrequires = ();
+  my @rpmspec_requires = ();
+  
+  # Get BuildRequires using rpmspec
+  eval {
+    my $buildrequires_output = `rpmspec -q --buildrequires "$specfile" 2>/dev/null`;
+    if ($? == 0 && $buildrequires_output) {
+      @rpmspec_buildrequires = grep { $_ ne '' } split(/\n/, $buildrequires_output);
+      chomp @rpmspec_buildrequires;
+    }
+  };
+  
+  # Get Requires using rpmspec  
+  eval {
+    my $requires_output = `rpmspec -q --requires "$specfile" 2>/dev/null`;
+    if ($? == 0 && $requires_output) {
+      @rpmspec_requires = grep { $_ ne '' } split(/\n/, $requires_output);
+      chomp @rpmspec_requires;
+    }
+  };
+  
+  # Merge rpmspec results with existing dependencies
+  if (@rpmspec_buildrequires || @rpmspec_requires) {
+    my %existing_deps = ();
+    
+    # Index existing dependencies to avoid duplicates
+    for my $dep (@{$ret->{'deps'} || []}) {
+      $existing_deps{$dep} = 1;
+    }
+    
+    # Add new BuildRequires from rpmspec
+    my @new_deps = ();
+    for my $dep (@rpmspec_buildrequires, @rpmspec_requires) {
+      # Clean up the dependency (remove version constraints for indexing)
+      my $dep_name = $dep;
+      $dep_name =~ s/\s*[<>=].*$//; # Remove version constraints
+      
+      unless ($existing_deps{$dep} || $existing_deps{$dep_name}) {
+        push @new_deps, $dep;
+        $existing_deps{$dep} = 1;
+        $existing_deps{$dep_name} = 1;
+      }
+    }
+    
+    # Add new dependencies to the result
+    if (@new_deps) {
+      push @{$ret->{'deps'}}, @new_deps;
+      
+      # Add a flag to indicate that rpmspec enhanced the dependencies
+      $ret->{'rpmspec_enhanced'} = 1;
+      $ret->{'rpmspec_added_deps'} = \@new_deps if $config->{'debug'};
+    }
+  }
 }
 
 1;

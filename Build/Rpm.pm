@@ -1982,10 +1982,9 @@ sub enhance_deps_with_rpmspec {
     }
     
     # Add new dependencies to the result
-    warn("rpmspec added dependencies: " . join(', ', @new_deps) . "\n");
+    print "rpmspec added dependencies: ", join(', ', @new_deps), "\n";
     if (@new_deps) {
       push @{$ret->{'deps'}}, @new_deps;
-      # print debug information if enabled
       
       # Add a flag to indicate that rpmspec enhanced the dependencies
       $ret->{'rpmspec_enhanced'} = 1;

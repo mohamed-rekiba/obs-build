@@ -687,11 +687,42 @@ else
     #
     RPMLIST=$BUILD_INIT_CACHE/rpmlist
     test -z "$LIST_STATE" && echo "expanding package dependencies..."
-    VMOPT=
-    test -z "$PREPARE_VM" || VMOPT=--vm
-    if ! $BUILD_DIR/expanddeps $USEUSEDFORBUILD $VMOPT "${definesnstuff[@]}" --dist "$BUILD_DIST" --depfile "$CACHE_FILE" --archpath "$BUILD_ARCH" --configdir $CONFIG_DIR "${PKGS[@]}" >$RPMLIST; then
-      rm -f $BUILD_IS_RUNNING
-      cleanup_and_exit 1
+
+    # Check if we have a spec file and rpmspec is available on the host
+    SPEC_FILE=""
+    USE_RPMSPEC=0
+    for PKG in "${PKGS[@]}"; do
+      if [[ "$PKG" == *.spec ]]; then
+        # Check if rpmspec is available on the host system
+        if command -v rpmspec >/dev/null 2>&1; then
+          SPEC_FILE="$PKG"
+          USE_RPMSPEC=1
+        fi
+        break
+      fi
+    done
+
+    if [[ "$USE_RPMSPEC" -eq 1 ]]; then
+      # Use rpmspec to get buildrequires for spec files
+      test -z "$LIST_STATE" && echo "using rpmspec to get build requirements..."
+      if rpmspec -q --buildrequires "$SPEC_FILE" 2>/dev/null | while read pkg; do
+        echo "$pkg /dev/null"
+      done >$RPMLIST; then
+        test -z "$LIST_STATE" && echo "successfully extracted build requirements with rpmspec"
+      else
+        test -z "$LIST_STATE" && echo "rpmspec failed, falling back to expanddeps"
+        USE_RPMSPEC=0
+      fi
+    fi
+
+    if [[ "$USE_RPMSPEC" -eq 0 ]]; then
+      # Use original expanddeps method
+      VMOPT=
+      test -z "$PREPARE_VM" || VMOPT=--vm
+      if ! $BUILD_DIR/expanddeps $USEUSEDFORBUILD $VMOPT "${definesnstuff[@]}" --dist "$BUILD_DIST" --depfile "$CACHE_FILE" --archpath "$BUILD_ARCH" --configdir $CONFIG_DIR "${PKGS[@]}" >$RPMLIST; then
+        rm -f $BUILD_IS_RUNNING
+        cleanup_and_exit 1
+      fi
     fi
   fi
 

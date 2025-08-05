@@ -665,6 +665,42 @@ if test "${repos[*]}" = config:; then
   repos=($(queryconfig repourl --dist "$BUILD_DIST" --configdir "$CONFIG_DIR" --archpath "$BUILD_ARCH"))
 fi
 
+#
+# Extract BuildRequires from spec file EARLY - before any dependency resolution
+#
+echo "Extract BuildRequires from spec file EARLY - before any dependency resolution"
+echo "RPMLIST: ${RPMLIST}"
+echo "PKGS[0]: ${PKGS[0]}"
+echo "REPOTYPE: $REPOTYPE"
+echo "which rpmspec: $(which rpmspec)"
+echo "rpm dist: $(rpm --eval '%{dist}')"
+echo "rpm rhel: $(rpm --eval '%{?rhel}')"
+echo "exists ${PKGS[0]}: $(test -f "${PKGS[0]}")"
+if [[ "${PKGS[0]}" == *.spec ]] && [[ "${PKGS[0]}" != *libdummy1.spec ]]; then
+  SPEC_FILE="${PKGS[0]}"
+  echo "Extracting BuildRequires from $SPEC_FILE using rpmspec..."
+
+  # Use rpmspec if available for accurate BuildRequires extraction
+  if test -f "$SPEC_FILE" && which rpmspec >/dev/null 2>&1; then
+    RPMSPEC_BUILDREQUIRES=()
+    while IFS= read -r dep; do
+      # Filter out rpmlib dependencies and empty lines
+      [[ -n "$dep" && "$dep" != rpmlib\(* ]] && RPMSPEC_BUILDREQUIRES+=("$dep")
+    done < <(rpmspec -q --buildrequires "$SPEC_FILE" 2>/dev/null)
+
+    if [[ ${#RPMSPEC_BUILDREQUIRES[@]} -gt 0 ]]; then
+      echo "Found BuildRequires: ${RPMSPEC_BUILDREQUIRES[*]}"
+      # Add BuildRequires to SRC array BEFORE any processing
+      SRC=("${SRC[@]}" "${RPMSPEC_BUILDREQUIRES[@]}")
+      echo "Updated SRC array with BuildRequires: ${SRC[*]}"
+    else
+      echo "No BuildRequires found or rpmspec failed"
+    fi
+  else
+    echo "rpmspec not available, skipping BuildRequires extraction"
+  fi
+fi
+
 if test -e $BUILD_ROOT/.build/init_buildsystem.data; then
   # vm continuation, read old config
   . $BUILD_ROOT/.build/init_buildsystem.data

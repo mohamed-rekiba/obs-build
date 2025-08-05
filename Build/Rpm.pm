@@ -27,6 +27,7 @@ our $includecallback;
 use strict;
 
 use Digest::MD5;
+use File::Temp qw(tempfile);
 
 sub expr_boolify {
   my ($v) = @_;
@@ -661,6 +662,76 @@ sub needmorelines {
   return $pc || $bc || $xc || $nc ? 1 : 0;
 }
 
+# Create a temporary spec file from content
+sub create_temp_spec_file {
+    my ($content) = @_;
+
+    return undef unless defined($content) && $content ne '';
+
+    my ($fh, $tempfile) = tempfile(
+        TEMPLATE => 'rpm-XXXXXX',
+        SUFFIX   => '.spec',
+        UNLINK   => 0,
+        DIR      => '/tmp'
+    );
+
+    return undef unless defined($fh);
+
+    print $fh $content;
+    close $fh;
+
+    # Check file exists and is not empty
+    if (!-f $tempfile || -z $tempfile) {
+        unlink($tempfile) if -f $tempfile;
+        return undef;
+    }
+
+    return $tempfile;
+}
+
+# Extract BuildRequires using rpmspec utility with Perl fallback
+sub extract_buildrequires_with_rpmspec {
+  my ($config, $specfile) = @_;
+
+  # Only proceed if rpmspec is available
+  my $rpmspec = `which rpmspec 2>/dev/null`;
+  chomp $rpmspec;
+  return undef unless -x $rpmspec;
+
+  my $temp_file;
+  # Handle array input (spec content) by creating temp file
+  if (ref($specfile) eq 'ARRAY') {
+    $temp_file = create_temp_spec_file(join("\n", @$specfile));
+    return undef unless defined($temp_file) && -s $temp_file;
+    $specfile = $temp_file;
+  }
+
+  # Verify we have a valid spec file
+  return undef unless -f $specfile && -s $specfile;
+
+  my @builddeps;
+  eval {
+    # Execute rpmspec command to get build requirements
+    my @cmd = ('rpmspec', '-q', '--buildrequires', $specfile);
+    my $output = `@cmd 2>/dev/null`;
+
+    if ($? == 0) {  # Check command exit status
+      # Split output into lines and clean up
+      @builddeps = grep { $_ ne '' }
+                   map { s/^\s+|\s+$//gr }  # trim whitespace
+                   split(/\n/, $output);
+    }
+  };
+
+  # Clean up temp file if we created one
+  unlink($temp_file) if $temp_file;
+
+  # If any error occurred, return undef for fallback
+  return undef if $@ || !@builddeps;
+
+  return \@builddeps;
+}
+
 sub splitdeps {
   my ($d) = @_;
   my @deps;
@@ -1176,6 +1247,12 @@ sub parse {
       $$nfbline = [$$nfbline, undef ];
     }
   }
+  # Get BuildRequires from spec file using rpmspec
+  # my $buildrequires = extract_buildrequires_with_rpmspec($config, $specfile);
+  # if (defined($buildrequires)) {
+  #   push @packdeps, @$buildrequires;
+  # }
+  # do_warn($config, "BuildRequires: ".join(", ", @packdeps)) if @packdeps;
   unshift @subpacks, $ret->{'name'} if defined $ret->{'name'};
   $ret->{'subpacks'} = \@subpacks;
   $ret->{'exclarch'} = $exclarch if $exclarch;

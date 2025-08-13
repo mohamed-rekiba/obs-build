@@ -1075,6 +1075,38 @@ listinstalled --root "$BUILD_ROOT" --type "$PSUF" --extraname | (
 # do pre-installation work
 pkg_prepare
 
+# Extract build requirements from RPM packages
+if test "$PSUF" = "rpm" && test -f "${PKGS[0]}"; then
+  echo "extracting build requirements..."
+  BUILDREQS_TO_INSTALL=
+
+  # Extract build requirements using rpmspec
+  buildreqs=$(rpmspec -q --buildrequires "${PKGS[0]}" 2>/dev/null)
+  if test -n "$buildreqs"; then
+    for req in $buildreqs; do
+      # Add to build requirements list if not already present
+      case " $BUILDREQS_TO_INSTALL " in
+        *" $req "*) ;;
+        *) BUILDREQS_TO_INSTALL="$BUILDREQS_TO_INSTALL $req" ;;
+      esac
+    done
+  fi
+
+  # Add build requirements to main installation list
+  if test -n "$BUILDREQS_TO_INSTALL"; then
+    echo "adding build requirements: $BUILDREQS_TO_INSTALL"
+    # Note: Build requirements are extracted from source spec files
+    # They will be handled by the existing dependency resolution system
+    # Only add them if they're not already in the list
+    for req in $BUILDREQS_TO_INSTALL; do
+      case " $PACKAGES_TO_INSTALL " in
+        *" $req "*) ;;
+        *) PACKAGES_TO_INSTALL="$PACKAGES_TO_INSTALL $req" ;;
+      esac
+    done
+  fi
+fi
+
 #
 # delete all packages we don't want
 #

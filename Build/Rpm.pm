@@ -955,7 +955,7 @@ sub parse {
     }
 
     # expand macros unless we are ignoring the line due to an %if
-    if (!$skip && index($line, '%') >= 0) {
+    if (!$skip && index($line, '%') >= 0 && !($line =~ /^\s*#/ && $line !~ /^#!/)) {
       $line = expandmacros($config, $line, \%macros, \%macros_args);
       $line = splitexpansionresult($line, \@includelines) if $line =~ /\n/s;
     }
